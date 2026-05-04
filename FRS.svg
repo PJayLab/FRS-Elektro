@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Background -->
+  <rect x="0" y="0" width="64" height="64" rx="16" fill="#dc2626"></rect>
+  
+  <!-- Lightning (Zap) -->
+  <path d="M28 6L10 34h14l-4 24 24-34H30l-2-18z" fill="white"></path>
+</svg>

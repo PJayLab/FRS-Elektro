@@ -1,0 +1,7 @@
+{
+  "name": "EVU Network Explorer",
+  "description": "GIS application for searching and visualizing electrical supply networks, including buildings, transformers, and distribution boxes.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
