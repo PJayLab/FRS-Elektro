@@ -1,238 +1,109 @@
-import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, Circle } from 'react-leaflet';
+import React, { useEffect, useMemo, useState } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents, Circle, Tooltip, ZoomControl } from 'react-leaflet';
+import { renderToStaticMarkup } from 'react-dom/server';
 import L from 'leaflet';
-import { NetworkResult, NearbyObject } from '../types';
+import { MapBounds, MapStyle, NetworkResult, NearbyObject, ObjectType } from '../types';
+import { hasCoordinates, networkSegments, objectLabels, objectName } from '../lib/map';
+import { ObjectSymbol } from './ObjectSymbol';
 
-// Fix for default marker icons
-const markerIcon = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png';
-const markerShadow = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
-
-const MAP_STYLES: Record<string, string> = {
-  light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-  dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-  voyager: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-  minimal: "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
-  osm: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-  satellite: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+const attribution = '&copy; <a href="https://www.swisstopo.admin.ch/">swisstopo</a>';
+const baseUrl = 'https://wmts.geo.admin.ch/1.0.0/';
+const tiles = {
+  light: `${baseUrl}ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg`,
+  dark: `${baseUrl}ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg`,
+  satellite: `${baseUrl}ch.swisstopo.swissimage/default/current/3857/{z}/{x}/{y}.jpeg`,
 };
+const icons = Object.fromEntries((['building', 'transformer', 'distribution_box', 'disconnect_point'] as ObjectType[]).map(type => [type, L.divIcon({
+  className: 'tactical-marker', html: renderToStaticMarkup(<ObjectSymbol type={type} />), iconSize: [28, 28], iconAnchor: [14, 14],
+})]));
 
-let DefaultIcon = L.icon({
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-});
-
-L.Marker.prototype.options.icon = DefaultIcon;
-
-const createCustomIcon = (color: string, type: 'building' | 'transformer' | 'distribution_box' | 'disconnect_point') => {
-  let svgContent = '';
-  
-  switch (type) {
-    case 'building':
-      svgContent = `<path d="M3 21h18M3 7l9-4 9 4v14H3V7z" fill="white" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`;
-      break;
-    case 'transformer':
-      svgContent = `<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="white" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`;
-      break;
-    case 'distribution_box':
-      svgContent = `<rect x="4" y="4" width="16" height="16" rx="2" fill="white" stroke="${color}" stroke-width="2" stroke-linejoin="round"/><path d="M8 8h8M8 12h8M8 16h4" stroke="${color}" stroke-width="2" stroke-linecap="round"/>`;
-      break;
-    case 'disconnect_point':
-      svgContent = `<circle cx="12" cy="12" r="8" fill="white" stroke="${color}" stroke-width="3"/><path d="M8 8l8 8M16 8l-8 8" stroke="${color}" stroke-width="2" stroke-linecap="round"/>`;
-      break;
+const ObjectMarkers: React.FC<{ objects: NearbyObject[] }> = ({ objects }) => {
+  // Co-located objects share a badge so a cabinet cannot cover its transformer.
+  const groups = new Map<string, NearbyObject[]>();
+  for (const object of objects) {
+    const key = `${object.lat},${object.lon}`;
+    groups.set(key, [...(groups.get(key) || []), object]);
   }
-
-  return new L.DivIcon({
-    className: 'tactical-marker',
-    html: `
-      <div style="
-        background-color: ${color}; 
-        width: 24px; 
-        height: 24px; 
-        border-radius: 8px; 
-        border: 2px solid white; 
-        box-shadow: 0 0 10px ${color}88, 0 2px 4px rgba(0,0,0,0.3);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: transform 0.2s ease-out;
-      ">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          ${svgContent}
-        </svg>
-      </div>
-    `,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-  });
-};
-
-const icons = {
-  building: createCustomIcon('#ef4444', 'building'), // Red
-  transformer: createCustomIcon('#3b82f6', 'transformer'), // Blue
-  distribution_box: createCustomIcon('#eab308', 'distribution_box'), // Yellow
-  disconnect_point: createCustomIcon('#1f2937', 'disconnect_point'), // Dark Gray
+  return <>{[...groups.entries()].map(([key, group]) => {
+    const icon = group.length === 1 ? icons[group[0].type] : L.divIcon({
+      className: 'tactical-marker',
+      html: renderToStaticMarkup(<div style={{ display: 'flex', gap: 2 }}>{group.map((object, index) => <React.Fragment key={index}><ObjectSymbol type={object.type} /></React.Fragment>)}</div>),
+      iconSize: [group.length * 30 - 2, 28], iconAnchor: [(group.length * 30 - 2) / 2, 14],
+    });
+    return <Marker key={key} position={[group[0].lat, group[0].lon]} icon={icon}>
+      <Tooltip>{group.map(objectName).join(' · ')}</Tooltip>
+      <Popup>{group.map((object, index) => <div key={index} className={index ? 'mt-2' : ''}><div className="font-bold">{objectName(object)}</div><div className="text-xs text-slate-400">{objectLabels[object.type] || 'Objekt'}</div></div>)}</Popup>
+    </Marker>;
+  })}</>;
 };
 
 interface MapViewProps {
   selectedResult: NetworkResult | null;
   nearbyObjects: NearbyObject[];
   userLocation: [number, number] | null;
+  objectLocation: [number, number] | null;
   showConnections: boolean;
-  onMarkerClick: (name: string) => void;
+  showBuildings: boolean;
+  mapStyle: MapStyle;
+  onBoundsChange: (bounds: MapBounds) => void;
 }
 
-function ChangeView({ center, zoom, bounds }: { center?: [number, number]; zoom?: number; bounds?: L.LatLngBoundsExpression }) {
-  const map = useMap();
+function ViewController({ selectedResult, userLocation, objectLocation, onBoundsChange }: Pick<MapViewProps, 'selectedResult' | 'userLocation' | 'objectLocation' | 'onBoundsChange'>) {
+  const map = useMapEvents({ moveend: publishBounds, resize: publishBounds });
+  function publishBounds() {
+    const b = map.getBounds();
+    onBoundsChange({ north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() });
+  }
+  useEffect(() => { publishBounds(); }, [map, onBoundsChange]);
   useEffect(() => {
-    if (bounds) {
-      map.fitBounds(bounds, { padding: [50, 50] });
-    } else if (center) {
-      map.setView(center, zoom || 15);
-    }
-  }, [center, zoom, bounds, map]);
+    if (!selectedResult) return;
+    const points = [selectedResult.transformer, selectedResult.distribution_box, selectedResult.disconnect_point, selectedResult.building].filter(hasCoordinates).map(o => [o.lat, o.lon] as [number, number]);
+    if (points.length) map.fitBounds(L.latLngBounds(points), { padding: [60, 60], maxZoom: 18 });
+  }, [selectedResult, map]);
+  useEffect(() => { if (userLocation) map.setView(userLocation, 16); }, [userLocation, map]);
+  useEffect(() => { if (objectLocation) map.setView(objectLocation, 18); }, [objectLocation, map]);
   return null;
 }
 
-export const MapView: React.FC<MapViewProps> = ({ selectedResult, nearbyObjects, userLocation, showConnections, onMarkerClick }) => {
-  const defaultCenter: [number, number] = [47.17617354807756, 8.10599555386044];
-  
-  const getBounds = () => {
-    if (!selectedResult) return undefined;
-    const points: [number, number][] = [];
-    if (selectedResult.building.lat && selectedResult.building.lon) points.push([selectedResult.building.lat, selectedResult.building.lon]);
-    if (selectedResult.transformer?.lat && selectedResult.transformer?.lon) points.push([selectedResult.transformer.lat, selectedResult.transformer.lon]);
-    if (selectedResult.distribution_box?.lat && selectedResult.distribution_box?.lon) points.push([selectedResult.distribution_box.lat, selectedResult.distribution_box.lon]);
-    if (selectedResult.disconnect_point?.lat && selectedResult.disconnect_point?.lon) points.push([selectedResult.disconnect_point.lat, selectedResult.disconnect_point.lon]);
-    
-    if (points.length < 2) return undefined;
-    return L.latLngBounds(points);
-  };
+const DirectedLine: React.FC<{ from: [number, number]; to: [number, number]; color: string }> = ({ from, to, color }) => {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+  useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
+  const arrows = useMemo(() => {
+    const start = map.project(from, zoom), end = map.project(to, zoom);
+    const distance = start.distanceTo(end);
+    if (distance < 32) return [];
+    const count = Math.min(30, Math.max(1, Math.floor(distance / 100)));
+    const angle = Math.atan2(end.y - start.y, end.x - start.x) * 180 / Math.PI;
+    return Array.from({ length: count }, (_, i) => ({
+      position: map.unproject(start.add(end.subtract(start).multiplyBy((i + 1) / (count + 1))), zoom),
+      icon: L.divIcon({ className: 'flow-arrow', iconSize: [20, 20], iconAnchor: [10, 10], html: `<svg width="20" height="20" viewBox="0 0 20 20" style="transform:rotate(${angle}deg)"><path d="M5 3 L13 10 L5 17" fill="none" stroke="white" stroke-width="6" stroke-linejoin="round"/><path d="M5 3 L13 10 L5 17" fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round"/></svg>` }),
+    }));
+  }, [from[0], from[1], to[0], to[1], zoom, map, color]);
+  return <>
+    <Polyline positions={[from, to]} pathOptions={{ color: 'white', weight: 7, opacity: 0.8 }} interactive={false} />
+    <Polyline positions={[from, to]} pathOptions={{ color, weight: 4, opacity: 1 }}><Popup>Stromrichtung: Trafostation → Zwischenobjekte → Gebäude</Popup></Polyline>
+    {arrows.map((arrow, i) => <Marker key={i} position={arrow.position} icon={arrow.icon} interactive={false} keyboard={false} zIndexOffset={-1000} />)}
+  </>;
+}
 
-  const bounds = getBounds();
-
-  return (
-    <div className="w-full h-full relative bg-slate-100">
-      <MapContainer center={defaultCenter} zoom={14} className="w-full h-full" zoomControl={false}>
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url={MAP_STYLES['voyager']}
-        />
-        
-        {/* User Location */}
-        {userLocation && (
-          <>
-            <Marker position={userLocation}>
-              <Popup>Standort</Popup>
-            </Marker>
-            <Circle center={userLocation} radius={500} pathOptions={{ color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.1, weight: 1 }} />
-          </>
-        )}
-
-        {/* Nearby Objects */}
-        {nearbyObjects.map((obj, idx) => (
-          <Marker 
-            key={`nearby-${idx}`} 
-            position={[obj.lat, obj.lon]} 
-            icon={icons[obj.type] || DefaultIcon}
-            eventHandlers={{ click: () => onMarkerClick(obj.name) }}
-          >
-            <Popup className="dark-popup">
-              <div className="text-slate-100">
-                <div className="font-bold">{obj.name}</div>
-                <div className="text-[10px] uppercase opacity-50 tracking-widest">{obj.type.replace('_', ' ')}</div>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
-
-        {/* Selected Network */}
-        {selectedResult && (
-          <>
-            {/* Markers */}
-            {selectedResult.building.lat && selectedResult.building.lon && (
-              <Marker position={[selectedResult.building.lat, selectedResult.building.lon]} icon={icons.building}>
-                <Popup>Gebäude: {selectedResult.building.address}</Popup>
-              </Marker>
-            )}
-            {selectedResult.transformer?.lat && selectedResult.transformer?.lon && (
-              <Marker position={[selectedResult.transformer.lat, selectedResult.transformer.lon]} icon={icons.transformer}>
-                <Popup>Trafo: {selectedResult.transformer.address}</Popup>
-              </Marker>
-            )}
-            {selectedResult.distribution_box?.lat && selectedResult.distribution_box?.lon && 
-             !(selectedResult.transformer?.lat === selectedResult.distribution_box.lat && 
-               selectedResult.transformer?.lon === selectedResult.distribution_box.lon) && (
-              <Marker position={[selectedResult.distribution_box.lat, selectedResult.distribution_box.lon]} icon={icons.distribution_box}>
-                <Popup>VK: {selectedResult.distribution_box.address}</Popup>
-              </Marker>
-            )}
-            {selectedResult.disconnect_point?.lat && selectedResult.disconnect_point?.lon && (
-              <Marker position={[selectedResult.disconnect_point.lat, selectedResult.disconnect_point.lon]} icon={icons.disconnect_point}>
-                <Popup>Trennstelle: {selectedResult.disconnect_point.address}</Popup>
-              </Marker>
-            )}
-
-            {/* Lines - ONLY if showConnections is true */}
-            {showConnections && (
-              <>
-                {/* Transformer -> Distribution Box */}
-                {selectedResult.transformer?.lat && selectedResult.transformer?.lon && 
-                 selectedResult.distribution_box?.lat && selectedResult.distribution_box?.lon && (
-                  <Polyline 
-                    positions={[
-                      [selectedResult.transformer.lat, selectedResult.transformer.lon],
-                      [selectedResult.distribution_box.lat, selectedResult.distribution_box.lon]
-                    ]}
-                    pathOptions={{ color: '#3b82f6', weight: 4, opacity: 0.8 }}
-                  />
-                )}
-
-                {/* Path to Building */}
-                {selectedResult.disconnect_point?.lat && selectedResult.disconnect_point?.lon ? (
-                  <>
-                    {/* Distribution Box -> Disconnect Point */}
-                    {selectedResult.distribution_box?.lat && selectedResult.distribution_box?.lon && (
-                      <Polyline 
-                        positions={[
-                          [selectedResult.distribution_box.lat, selectedResult.distribution_box.lon],
-                          [selectedResult.disconnect_point.lat, selectedResult.disconnect_point.lon]
-                        ]}
-                        pathOptions={{ color: '#3b82f6', weight: 4, opacity: 0.8 }}
-                      />
-                    )}
-                    {/* Disconnect Point -> Building */}
-                    {selectedResult.building.lat && selectedResult.building.lon && (
-                      <Polyline 
-                        positions={[
-                          [selectedResult.disconnect_point.lat, selectedResult.disconnect_point.lon],
-                          [selectedResult.building.lat, selectedResult.building.lon]
-                        ]}
-                        pathOptions={{ color: '#22c55e', weight: 4, opacity: 0.8 }}
-                      />
-                    )}
-                  </>
-                ) : (
-                  /* Distribution Box -> Building fallback */
-                  selectedResult.distribution_box?.lat && selectedResult.distribution_box?.lon && 
-                  selectedResult.building.lat && selectedResult.building.lon && (
-                    <Polyline 
-                      positions={[
-                        [selectedResult.distribution_box.lat, selectedResult.distribution_box.lon],
-                        [selectedResult.building.lat, selectedResult.building.lon]
-                      ]}
-                      pathOptions={{ color: '#22c55e', weight: 4, opacity: 0.8 }}
-                    />
-                  )
-                )}
-              </>
-            )}
-          </>
-        )}
-
-        <ChangeView bounds={bounds} center={userLocation || undefined} />
-      </MapContainer>
-    </div>
-  );
+export const MapView: React.FC<MapViewProps> = ({ selectedResult, nearbyObjects, userLocation, objectLocation, showConnections, showBuildings, mapStyle, onBoundsChange }) => {
+  const [tileError, setTileError] = useState(false);
+  useEffect(() => setTileError(false), [mapStyle]);
+  const nodes = selectedResult ? (['transformer', 'distribution_box', 'disconnect_point', 'building'] as ObjectType[]).flatMap(type => {
+    const object = selectedResult[type];
+    return hasCoordinates(object) ? [{ ...object, type, name: object.address }] : [];
+  }) : [];
+  return <div className="w-full h-full relative bg-slate-100">
+    <MapContainer center={[47.17617354807756, 8.10599555386044]} zoom={14} className="w-full h-full" zoomControl={false} attributionControl={false} maxZoom={21}>
+      <TileLayer key={mapStyle} attribution={attribution} url={tiles[mapStyle]} className={mapStyle === 'satellite' ? '' : `map-tiles-${mapStyle}`} maxNativeZoom={mapStyle === 'satellite' ? 20 : 18} maxZoom={21} eventHandlers={{ tileerror: () => setTileError(true), tileload: () => setTileError(false) }} />
+      <ZoomControl position="bottomleft" />
+      {userLocation && <><Circle center={userLocation} radius={500} pathOptions={{ color: '#ef4444', fillOpacity: 0.04, weight: 1 }} /><Circle center={userLocation} radius={8} pathOptions={{ color: 'white', fillColor: '#2563eb', fillOpacity: 1, weight: 3 }}><Popup>Dein Standort</Popup></Circle></>}
+      <ObjectMarkers objects={nearbyObjects.filter(obj => (showBuildings || obj.type !== 'building') && Number.isFinite(obj.lat) && Number.isFinite(obj.lon))} />
+      <ObjectMarkers objects={nodes} />
+      {selectedResult && showConnections && networkSegments(selectedResult).map(([from, to], i) => <DirectedLine key={i} from={[from.lat, from.lon]} to={[to.lat, to.lon]} color={mapStyle === 'light' ? '#334155' : '#38bdf8'} />)}
+      <ViewController selectedResult={selectedResult} userLocation={userLocation} objectLocation={objectLocation} onBoundsChange={onBoundsChange} />
+    </MapContainer>
+    {tileError && <div role="status" className="absolute bottom-10 left-14 right-20 z-[500] rounded-lg bg-slate-900 p-2 text-xs text-white">Kartenmaterial nicht verfügbar. Internetverbindung prüfen oder Kartenmodus wechseln. swisstopo deckt die Schweiz ab.</div>}
+  </div>;
 };
