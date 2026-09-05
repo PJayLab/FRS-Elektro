@@ -71,7 +71,7 @@ export default function App() {
     if (!selectedResult?.connection) return;
     setIsSubmittingReport(true);
     try {
-      const response = await authenticatedFetch(`/search/connection/${selectedResult.connection.uuid}/report`, {
+      const response = await authenticatedFetch(`/api/search/connection/${selectedResult.connection.uuid}/report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -113,7 +113,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const response = await authenticatedFetch(`/search/connection?q=${encodeURIComponent(searchQuery)}`);
+      const response = await authenticatedFetch(`/api/search/connection?q=${encodeURIComponent(searchQuery)}`);
       if (response.status === 401) {
         handleLogout();
         return;
@@ -153,7 +153,7 @@ export default function App() {
     setSearchQuery(res.address);
     setSelectedResult(null);
     try {
-      const response = await authenticatedFetch(`/search/connection/${res.connection_uuid}`);
+      const response = await authenticatedFetch(`/api/search/connection/${res.connection_uuid}`);
       if (response.status === 401) {
         handleLogout();
         return;
@@ -183,7 +183,7 @@ export default function App() {
         setUserLocation([latitude, longitude]);
         
         try {
-          const response = await authenticatedFetch(`/search/nearby?lat=${latitude}&lon=${longitude}&radius=500`);
+          const response = await authenticatedFetch(`/api/search/nearby?lat=${latitude}&lon=${longitude}&radius=500`);
           if (response.status === 401) {
             handleLogout();
             return;
