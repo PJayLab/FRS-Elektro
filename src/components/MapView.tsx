@@ -9,7 +9,7 @@ import { ObjectSymbol } from './ObjectSymbol';
 const attribution = '&copy; <a href="https://www.swisstopo.admin.ch/">swisstopo</a>';
 const baseUrl = 'https://wmts.geo.admin.ch/1.0.0/';
 const tiles = {
-  light: `${baseUrl}ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg`,
+  light: `${baseUrl}ch.swisstopo.pixelkarte-farbe/default/current/3857/{z}/{x}/{y}.jpeg`,
   dark: `${baseUrl}ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg`,
   satellite: `${baseUrl}ch.swisstopo.swissimage/default/current/3857/{z}/{x}/{y}.jpeg`,
 };
