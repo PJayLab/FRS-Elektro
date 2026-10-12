@@ -1,65 +1,78 @@
-## Run Locally
+## Run locally
 
-**Prerequisites:**  Node.js
+**Prerequisite:** Node.js.
 
+1. Install dependencies with `npm install`.
+2. Start the app with `npm run dev`.
 
-1. Install dependencies:
-   `npm install`
-2. Run the app:
-   `npm run dev`
+## Maps and nearby search
 
-## Karten und Umgebungssuche
+The map uses public swisstopo WMTS tiles without an API key. The top-right
+settings menu offers **Hell**, **Dunkel**, and **Satellit**, and saves the selected
+map style locally. Light mode uses the color map; dark mode uses grayscale tiles
+with a filter that affects only the background. Satellite mode uses SWISSIMAGE.
+High-resolution coverage focuses on Switzerland. Keep the `© swisstopo`
+attribution visible.
 
-Die Karten verwenden swisstopo WMTS ohne API-Key. Die Einstellungen oben rechts
-bieten **Hell**, **Dunkel** und **Satellit**; die Auswahl bleibt lokal gespeichert.
-Hell verwendet die graue Landeskarte, Dunkel dieselben Kacheln mit einem Filter,
-Satellit das SWISSIMAGE-Luftbild. Der Filter betrifft nur die Hintergrundkarte.
-Die hochauflösende Abdeckung ist auf die Schweiz ausgerichtet. Die Quellenangabe
-`© swisstopo` muss sichtbar bleiben.
+- [swisstopo open geodata](https://www.swisstopo.admin.ch/en/faq-free-geodata)
+- [Geoservices](https://www.swisstopo.admin.ch/en/geoservices-with-swisstopo-geodata)
+- [WMTS capabilities](https://wmts.geo.admin.ch/EPSG/3857/1.0.0/WMTSCapabilities.xml)
 
-- [swisstopo: freie Geodaten und Dienste](https://www.swisstopo.admin.ch/en/faq-free-geodata)
-- [Geodienste](https://www.swisstopo.admin.ch/en/geoservices-with-swisstopo-geodata)
-- [WMTS Capabilities EPSG:3857](https://wmts.geo.admin.ch/EPSG/3857/1.0.0/WMTSCapabilities.xml)
+The current swisstopo setup needs no key. If CARTO basemaps are reintroduced,
+obtain a provider-issued key and include it in the tile URL's `key` parameter.
+See [CARTO API keys](https://carto.com/basemaps/apikey/).
 
-Die frühere CARTO-Karte verlangt inzwischen einen Schlüssel. Falls CARTO später
-wieder eingesetzt werden soll, muss ein Key beim Anbieter angefordert und als
-`key`-Parameter in der Kachel-URL eingebunden werden. Einen gültigen Key kann
-nur der Anbieter ausstellen; für die jetzige swisstopo-Lösung ist keiner nötig.
-Siehe [CARTO-Key-Anforderung](https://carto.com/basemaps/apikey/).
+### Objects in the visible map area
 
-### Objekte im Kartenausschnitt
+The location button requests `/api/search/nearby?lat=…&lon=…&radius=500`.
+**In diesem Bereich suchen** uses the same authenticated endpoint with the
+current map center and a radius reaching the farthest corner. Results are
+filtered to the bounds visible when the search was started. New searches
+replace previous objects, stale responses are ignored, and area searches keep
+the current map position.
 
-Der Standortknopf fragt wie bisher `/api/search/nearby?lat=…&lon=…&radius=500` ab.
-**In diesem Bereich suchen** nutzt denselben authentifizierten Endpunkt mit der
-aktuellen Kartenmitte und einem Radius in Metern bis zur entferntesten Ecke.
-Die Antwort wird zusätzlich auf den beim Klick sichtbaren Ausschnitt gefiltert.
-Neue Abfragen ersetzen die vorherigen Objekte; verspätete Antworten werden ignoriert.
-Die Karte bleibt nach einer Ausschnittsuche an ihrer aktuellen Position.
+Both actions leave the connection view and display individual objects.
+The settings menu separates the following controls into two categories:
 
-Beide Aktionen verlassen die Verbindungsansicht und zeigen ausschliesslich Objekte.
-Gebäude sind standardmässig ausgeblendet und können unter Einstellungen aktiviert
-werden. Dies betrifft die Objektmarker, nicht die Gebäude auf den Hintergrundkacheln.
-Das Zielgebäude einer ausgewählten Verbindung bleibt sichtbar.
-Popups bevorzugen `display_name`, danach `address`, danach `name` und zeigen den
-Objekttyp auf Deutsch. Legende und Marker nutzen identische Symbole.
+- **Suche in Umgebung → Anzeige Gebäude:** show or hide nearby building markers.
+  Buildings are hidden by default. This does not affect buildings in background
+  tiles or the destination building of a selected connection.
+- **Verbindungsdarstellung → Zeige Verbindungen:** show or hide the selected
+  connection's lines and direction arrows. Enabled by default.
 
-Der maximale Suchradius im Frontend beträgt 10 km; bei grösseren Ausschnitten wird
-zum Heranzoomen aufgefordert. Das Backend ist nicht in diesem Repository enthalten.
-Es muss variable Radien unterstützen und eine vollständige Objektliste liefern.
-Serverseitige Ergebnislimits oder Pagination sind im bestehenden API-Vertrag nicht
-beschrieben und können deshalb nicht automatisch aufgelöst werden.
+The connection details sheet has a close button next to its expand/minimize
+control. It performs the same action as clearing the search field: removing the
+selected connection and clearing the query and search results in the frontend.
 
-Verbindungen werden schematisch in einer einheitlichen Farbe mit Richtungspfeilen
-von der Trafostation über vorhandene Zwischenobjekte zum Gebäude dargestellt.
-Es werden keine realen Kabelverläufe oder gemessenen Stromflüsse behauptet.
+A red close button beside **In diesem Bereich suchen** appears while a nearby
+search is loading or has results/status. It removes the displayed objects,
+location marker, search radius, and status, then disappears. Pending nearby
+requests and geolocation callbacks are invalidated so cleared objects cannot
+reappear from a late response. No backend records are deleted.
 
-### Suchergebnis-Typen
+Both controls use labeled, keyboard-accessible switches with icons.
+Hovering over or clicking an object marker opens the same dark-blue popup,
+including all objects sharing that location. Close it with its close button or
+by clicking the map. Popup names prefer `display_name`, then `address`, then
+`name`, and include the German object type. Legend and markers share symbols.
 
-Bestehende Treffer ohne `type` gelten weiterhin als `connection`. `connection_uuid`
-(oder das bisher teilweise verwendete `uuid`) identifiziert die Verbindung für
-`/api/search/connection/{id}`. Die Liste zeigt ein Verbindungssymbol und den Typnamen.
+The maximum frontend search radius is 10 km; larger areas prompt the user to
+zoom in. The backend is not included in this repository. It must support
+variable radii and return a complete object list. Server-side limits and
+pagination are not specified in the existing API contract and cannot be
+resolved automatically.
 
-Für spätere Einzelobjekte ist folgendes Format vorbereitet:
+Connections are schematic, use a consistent color, and show direction arrows
+from the transformer through available intermediate objects to the building.
+They do not represent actual cable routes or measured current flow.
+
+### Search result types
+
+Existing results without `type` are treated as `connection`. `connection_uuid`
+(or the legacy `uuid`) identifies the connection for
+`/api/search/connection/{id}`. Results show a connection icon and type label.
+
+Individual objects can use this format:
 
 ```json
 {
@@ -70,18 +83,18 @@ Für spätere Einzelobjekte ist folgendes Format vorbereitet:
 }
 ```
 
-Unterstützte Typen: `connection`, `building`, `transformer`, `distribution_box`,
-`disconnect_point`. Einzelobjekte mit Koordinaten werden direkt auf der Karte
-angezeigt, ohne einen Verbindungsdetail-Endpunkt aufzurufen. Ohne Koordinaten
-erscheint ein Hinweis. `location` als Ortsname (String) wird in der Trefferliste
-ebenfalls unterstützt. Der aktuelle Such-Endpunkt bleibt unverändert.
+Supported types: `connection`, `building`, `transformer`, `distribution_box`,
+and `disconnect_point`. Individual objects with coordinates appear directly
+on the map without a connection-detail request. Missing coordinates produce
+a notice. A string `location` is also supported as a place name in search
+results. The current search endpoint remains unchanged.
 
-### Prüfen
+### Validation
 
-- `npm run lint` – TypeScript
-- `npm test` – Geometrie, Stromrichtung und API-Kompatibilität
-- `npm run build` – Produktionsbuild
+- `npm run lint`: TypeScript checks.
+- `npm test`: geometry, flow direction, and API compatibility.
+- `npm run build`: production build.
 
-Browserprüfung mit simulierten API-Antworten durchführen, solange kein Testbackend
-mit geeigneten Zugangsdaten verfügbar ist. Kartenkacheln können unabhängig davon
-über den öffentlichen swisstopo-Dienst geladen werden.
+Use mocked API responses for browser checks when no test backend and suitable
+credentials are available. Map tiles can load independently from the public
+swisstopo service.

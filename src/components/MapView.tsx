@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents, Circle, Tooltip, ZoomControl } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents, Circle, ZoomControl } from 'react-leaflet';
 import { renderToStaticMarkup } from 'react-dom/server';
 import L from 'leaflet';
 import { MapBounds, MapStyle, NetworkResult, NearbyObject, ObjectType } from '../types';
@@ -30,8 +30,10 @@ const ObjectMarkers: React.FC<{ objects: NearbyObject[] }> = ({ objects }) => {
       html: renderToStaticMarkup(<div style={{ display: 'flex', gap: 2 }}>{group.map((object, index) => <React.Fragment key={index}><ObjectSymbol type={object.type} /></React.Fragment>)}</div>),
       iconSize: [group.length * 30 - 2, 28], iconAnchor: [(group.length * 30 - 2) / 2, 14],
     });
-    return <Marker key={key} position={[group[0].lat, group[0].lon]} icon={icon}>
-      <Tooltip>{group.map(objectName).join(' · ')}</Tooltip>
+    return <Marker key={key} position={[group[0].lat, group[0].lon]} icon={icon} eventHandlers={{
+      mouseover: event => event.target.openPopup(),
+      click: event => event.target.openPopup(),
+    }}>
       <Popup>{group.map((object, index) => <div key={index} className={index ? 'mt-2' : ''}><div className="font-bold">{objectName(object)}</div><div className="text-xs text-slate-400">{objectLabels[object.type] || 'Objekt'}</div></div>)}</Popup>
     </Marker>;
   })}</>;

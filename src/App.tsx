@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, MapPin, Info, ChevronRight, Loader2, Zap, Box, Database, Power, LogOut, ChevronUp, ChevronDown, X, Layers } from 'lucide-react';
+import { Search, MapPin, Info, ChevronRight, Loader2, Zap, Box, Database, Power, LogOut, ChevronUp, ChevronDown, X, Layers, Building2, Cable, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapBounds, MapStyle, NetworkResult, NearbyObject, SearchResult } from './types';
 import { areaQuery, inBounds, objectLabels, resultType } from './lib/map';
@@ -129,6 +129,17 @@ export default function App() {
     setSearchQuery('');
     setResults([]);
     setSelectedResult(null);
+    setError(null);
+  };
+
+  const clearNearby = () => {
+    // Invalidate pending fetches and geolocation callbacks before clearing the map.
+    nearbyRequest.current++;
+    setNearbyLoading(false);
+    setNearbyObjects([]);
+    setNearbyStatus(null);
+    setUserLocation(null);
+    setObjectLocation(null);
     setError(null);
   };
 
@@ -378,7 +389,7 @@ export default function App() {
                   initial={{ opacity: 0, scale: 0.95, y: 10 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                  className="absolute right-0 mt-3 w-56 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden py-2"
+                  className="absolute right-0 mt-3 w-72 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden py-2"
                 >
                   <div className="px-4 py-3 border-b border-slate-800 mb-2">
                     <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Angemeldet als</p>
@@ -391,26 +402,32 @@ export default function App() {
                       {(['light', 'dark', 'satellite'] as MapStyle[]).map(style => <button key={style} onClick={() => setMapStyle(style)} aria-pressed={mapStyle === style} className={cn('flex-1 rounded-lg py-2 text-xs font-bold', mapStyle === style ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-300')}>{({ light: 'Hell', dark: 'Dunkel', satellite: 'Satellit' })[style]}</button>)}
                     </div>
                   </div>
-                  <button onClick={() => setShowBuildings(!showBuildings)} aria-pressed={showBuildings} className="w-full px-4 py-3 text-left text-sm hover:bg-slate-800">Gebäude in Umgebung: <strong>{showBuildings ? 'Ein' : 'Aus'}</strong></button>
-                  <button
-                    aria-pressed={showConnections}
-                    onClick={() => setShowConnections(!showConnections)}
-                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-800 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Power className={cn("w-4 h-4", showConnections ? "text-red-500" : "text-slate-500")} />
-                      <span className="text-sm font-bold">Verbindungen</span>
-                    </div>
-                    <div className={cn(
-                      "w-8 h-4 rounded-full relative transition-colors",
-                      showConnections ? "bg-red-600" : "bg-slate-700"
-                    )}>
-                      <div className={cn(
-                        "absolute top-1 w-2 h-2 rounded-full bg-white transition-all",
-                        showConnections ? "left-5" : "left-1"
-                      )} />
-                    </div>
-                  </button>
+                  {[
+                    { category: 'Suche in Umgebung', label: 'Anzeige Gebäude', enabled: showBuildings, toggle: () => setShowBuildings(value => !value), Icon: Building2 },
+                    { category: 'Verbindungsdarstellung', label: 'Zeige Verbindungen', enabled: showConnections, toggle: () => setShowConnections(value => !value), Icon: Cable },
+                  ].map(({ category, label, enabled, toggle, Icon }) => (
+                    <section key={category} aria-label={category} className="border-b border-slate-800 py-3">
+                      <h3 className="px-4 mb-2 text-xs font-bold text-slate-400">{category}</h3>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={enabled}
+                        aria-label={label}
+                        onClick={toggle}
+                        className="w-full px-4 py-2 flex items-center justify-between gap-3 hover:bg-slate-800 transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-red-500"
+                      >
+                        <span className="flex items-center gap-3 text-sm font-bold">
+                          <Icon aria-hidden="true" className={cn('w-4 h-4 shrink-0', enabled ? 'text-red-500' : 'text-slate-500')} />
+                          {label}
+                        </span>
+                        <span aria-hidden="true" className={cn('w-10 h-6 shrink-0 rounded-full p-1 transition-colors', enabled ? 'bg-red-600' : 'bg-slate-600')}>
+                          <span className={cn('flex h-4 w-4 items-center justify-center rounded-full bg-white transition-transform', enabled ? 'translate-x-4' : 'translate-x-0')}>
+                            {enabled && <Check className="h-3 w-3 text-red-600" />}
+                          </span>
+                        </span>
+                      </button>
+                    </section>
+                  ))}
 
                   <button
                     onClick={handleLogout}
@@ -443,9 +460,22 @@ export default function App() {
           />
 
           <div className="absolute top-4 left-4 right-20 z-[500] flex flex-col items-start gap-2 pointer-events-none">
-            <button onClick={searchArea} disabled={nearbyLoading || !mapBounds} className="pointer-events-auto px-4 py-3 rounded-2xl bg-slate-900/95 text-white shadow-xl border border-slate-700 text-sm font-bold disabled:opacity-60 flex items-center gap-2">
-              {nearbyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}In diesem Bereich suchen
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={searchArea} disabled={nearbyLoading || !mapBounds} className="pointer-events-auto px-4 py-3 rounded-2xl bg-slate-900/95 text-white shadow-xl border border-slate-700 text-sm font-bold disabled:opacity-60 flex items-center gap-2">
+                {nearbyLoading ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <Search className="w-4 h-4 shrink-0" />}In diesem Bereich suchen
+              </button>
+              {(nearbyLoading || nearbyStatus !== null || nearbyObjects.length > 0) && (
+                <button
+                  type="button"
+                  onClick={clearNearby}
+                  aria-label="Objekte auf der Karte entfernen"
+                  title="Objekte auf der Karte entfernen"
+                  className="pointer-events-auto shrink-0 w-11 h-11 flex items-center justify-center rounded-2xl bg-slate-900/95 text-red-500 hover:bg-red-950 shadow-xl border border-red-900/50 focus-visible:outline-2 focus-visible:outline-red-500"
+                >
+                  <X aria-hidden="true" className="w-5 h-5" />
+                </button>
+              )}
+            </div>
             {nearbyStatus && <div role="status" className="rounded-xl bg-slate-900/95 px-3 py-2 text-xs text-slate-200 max-w-xs">{nearbyStatus} · {nearbyObjects.filter(o => showBuildings || o.type !== 'building').length} sichtbar{!showBuildings && ' · Gebäude ausgeblendet'}</div>}
           </div>
 
@@ -493,16 +523,33 @@ export default function App() {
                 onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
               >
                 <div className="w-12 h-1.5 bg-slate-800 rounded-full mb-4"></div>
-                <div className="flex items-center justify-between w-full px-8">
-                  <div className="flex items-center gap-3">
-                    <Box className="w-5 h-5 text-red-500" />
-                    <div>
-                      <h2 className="text-lg font-black text-white italic tracking-tighter uppercase leading-none">Gebäude Details</h2>
+                <div className="flex items-center justify-between gap-2 w-full px-4 sm:px-8">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Box className="w-5 h-5 text-red-500 shrink-0" />
+                    <div className="min-w-0">
+                      <h2 className="text-sm sm:text-lg font-black text-white italic tracking-tighter uppercase leading-none">Gebäude Details</h2>
                       <p className="text-[10px] text-slate-500 font-bold tracking-widest mt-1 truncate max-w-[200px]">{selectedResult.building.address}</p>
                     </div>
                   </div>
-                  <div className="bg-slate-800 p-2 rounded-full text-slate-400">
-                    {isDetailsExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      aria-label={isDetailsExpanded ? 'Verbindungsdetails minimieren' : 'Verbindungsdetails vergrössern'}
+                      aria-expanded={isDetailsExpanded}
+                      onClick={event => { event.stopPropagation(); setIsDetailsExpanded(value => !value); }}
+                      className="bg-slate-800 w-10 h-10 flex items-center justify-center rounded-full text-slate-400 hover:text-white focus-visible:outline-2 focus-visible:outline-red-500"
+                    >
+                      {isDetailsExpanded ? <ChevronDown aria-hidden="true" className="w-4 h-4" /> : <ChevronUp aria-hidden="true" className="w-4 h-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Verbindung aus der Ansicht entfernen"
+                      title="Verbindung aus der Ansicht entfernen"
+                      onClick={event => { event.stopPropagation(); clearSearch(); }}
+                      className="bg-slate-800 w-10 h-10 flex items-center justify-center rounded-full text-red-500 hover:bg-red-950 focus-visible:outline-2 focus-visible:outline-red-500"
+                    >
+                      <X aria-hidden="true" className="w-5 h-5" />
+                    </button>
                   </div>
                 </div>
               </div>
