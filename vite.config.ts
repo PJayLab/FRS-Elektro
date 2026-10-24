@@ -18,6 +18,17 @@ export default defineConfig(({mode}) => {
     server: {
       // 👇 DAS HIER HINZUFÜGEN
       proxy: {
+        '/gis/trenches': {
+          target: 'https://gis-api.494956.xyz',
+          changeOrigin: true,
+          rewrite: requestPath => requestPath.replace(/^\/gis\/trenches/, '/layers/elektrizitaet_trasse/features'),
+          configure: proxy => {
+            proxy.on('proxyReq', request => {
+              request.removeHeader('cookie');
+              request.setHeader('Authorization', `Bearer ${env.GIS_API_TOKEN || ''}`);
+            });
+          },
+        },
         "/search": {
           target: "http://localhost:8000",
           changeOrigin: true,

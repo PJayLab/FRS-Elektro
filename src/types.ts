@@ -1,10 +1,13 @@
 export interface SearchResult {
-  connection_uuid: string;
+  /** Missing type is the legacy connection response. */
+  type?: 'connection' | ObjectType;
+  connection_uuid?: string;
+  uuid?: string;
   address: string;
   location: {
     lat: number;
     lon: number;
-  } | null;
+  } | string | null;
 }
 
 export interface NetworkObject {
@@ -34,8 +37,14 @@ export interface NetworkResult {
 export type ObjectType = 'building' | 'transformer' | 'distribution_box' | 'disconnect_point';
 
 export interface NearbyObject {
+  uuid?: string;
+  address?: string;
+  display_name?: string;
   name: string;
   type: ObjectType;
   lat: number;
   lon: number;
 }
+
+export type MapStyle = 'light' | 'dark' | 'satellite';
+export interface MapBounds { north: number; south: number; east: number; west: number }

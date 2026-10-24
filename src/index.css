@@ -45,3 +45,8 @@ html, body, #root {
 .tactical-marker:hover div {
   transform: scale(1.3);
 }
+
+/* Apply only to the basemap: object colours, labels and controls stay unchanged. */
+.map-tiles-light { filter: contrast(0.55) brightness(1.35); }
+.map-tiles-dark { filter: invert(1) brightness(0.65) contrast(0.65); }
+.flow-arrow { pointer-events: none !important; }

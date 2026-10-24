@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Search, MapPin, Info, ChevronRight, Loader2, Zap, Box, Database, Power, LogOut, ChevronUp, ChevronDown, X, Layers } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Search, MapPin, Info, ChevronRight, Loader2, Zap, Box, Database, Power, LogOut, ChevronUp, ChevronDown, X, Layers, Building2, Cable, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { NetworkResult, NearbyObject, SearchResult } from './types';
+import { MapBounds, MapStyle, NetworkResult, NearbyObject, SearchResult } from './types';
+import { areaQuery, inBounds, objectLabels, resultType } from './lib/map';
+import { ObjectSymbol } from './components/ObjectSymbol';
 import { MapView } from './components/MapView';
 import { Login } from './components/Login';
 import { cn } from './lib/utils';
@@ -15,8 +17,22 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [nearbyObjects, setNearbyObjects] = useState<NearbyObject[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [objectLocation, setObjectLocation] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showTrenches, setShowTrenches] = useState(false);
   const [showConnections, setShowConnections] = useState(true);
+  const [showBuildings, setShowBuildings] = useState(false);
+  const [mapStyle, setMapStyle] = useState<MapStyle>(() => {
+    const saved = localStorage.getItem('elektro_map_style');
+    return saved === 'dark' || saved === 'satellite' ? saved : 'light';
+  });
+  const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
+  const [nearbyStatus, setNearbyStatus] = useState<string | null>(null);
+  const nearbyRequest = useRef(0);
+  const selectionRequest = useRef(0);
+  const searchRequest = useRef(0);
+  useEffect(() => { localStorage.setItem('elektro_map_style', mapStyle); }, [mapStyle]);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [isSelecting, setIsSelecting] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -58,7 +74,16 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    nearbyRequest.current++;
+    selectionRequest.current++;
+    searchRequest.current++;
+    setNearbyObjects([]);
+    setUserLocation(null);
+    setNearbyStatus(null);
+    setNearbyLoading(false);
     setToken(null);
+    setObjectLocation(null);
+    setLoading(false);
     setUsername(null);
     setSelectedResult(null);
     setResults([]);
@@ -98,6 +123,9 @@ export default function App() {
   };
 
   const clearSearch = () => {
+    searchRequest.current++;
+    selectionRequest.current++;
+    setLoading(false);
     setIsSelecting(false);
     setSearchQuery('');
     setResults([]);
@@ -105,30 +133,45 @@ export default function App() {
     setError(null);
   };
 
+  const clearNearby = () => {
+    // Invalidate pending fetches and geolocation callbacks before clearing the map.
+    nearbyRequest.current++;
+    setNearbyLoading(false);
+    setNearbyObjects([]);
+    setNearbyStatus(null);
+    setUserLocation(null);
+    setObjectLocation(null);
+    setError(null);
+  };
+
   const handleSearch = useCallback(async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (searchQuery.trim().length < 3) return;
     if (isSelecting) return;
+    const request = ++searchRequest.current;
 
     setLoading(true);
     setError(null);
     try {
       const response = await authenticatedFetch(`/api/search/connection?q=${encodeURIComponent(searchQuery)}`);
+      if (request !== searchRequest.current) return;
       if (response.status === 401) {
         handleLogout();
         return;
       }
       if (!response.ok) throw new Error('Search failed');
       const data = await response.json();
+      if (request !== searchRequest.current) return;
       setResults(Array.isArray(data) ? data : []);
       if (data && data.length === 0) setError('Keine Resultate gefunden');
     } catch (err) {
+      if (request !== searchRequest.current) return;
       console.error(err);
       setError('Fehler bei der Suche');
     } finally {
-      setLoading(false);
+      if (request === searchRequest.current) setLoading(false);
     }
-  }, [searchQuery, authenticatedFetch]);
+  }, [searchQuery, authenticatedFetch, isSelecting]);
 
   // Debounced search effect
   useEffect(() => {
@@ -144,65 +187,118 @@ export default function App() {
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, handleSearch]);
+  }, [searchQuery, handleSearch, isSelecting]);
 
   const selectResult = async (res: SearchResult) => {
+    const request = ++selectionRequest.current;
+    searchRequest.current++;
+    nearbyRequest.current++;
+    setNearbyLoading(false);
+    setNearbyObjects([]);
+    setNearbyStatus(null);
+    setUserLocation(null);
+    setObjectLocation(null);
     setIsSelecting(true);
     setLoading(true);
     setResults([]); // Close search list immediately
     setSearchQuery(res.address);
     setSelectedResult(null);
+    setError(null);
+    if (resultType(res) !== 'connection') {
+      if (res.location && typeof res.location === 'object' && Number.isFinite(res.location.lat) && Number.isFinite(res.location.lon)) {
+        setNearbyObjects([{ uuid: res.uuid, name: res.address, address: res.address, type: res.type as NearbyObject['type'], ...res.location }]);
+        setObjectLocation([res.location.lat, res.location.lon]);
+        if (res.type === 'building') setShowBuildings(true);
+      } else {
+        setError('Dieses Objekt enthält noch keine Kartenkoordinaten.');
+      }
+      setLoading(false);
+      return;
+    }
     try {
-      const response = await authenticatedFetch(`/api/search/connection/${res.connection_uuid}`);
+      if (!res.connection_uuid && !res.uuid) throw new Error('Verbindungs-ID fehlt');
+      const response = await authenticatedFetch(`/api/search/connection/${encodeURIComponent(res.connection_uuid || res.uuid)}`);
+      if (request !== selectionRequest.current) return;
       if (response.status === 401) {
         handleLogout();
         return;
       }
       if (!response.ok) throw new Error('Details konnten nicht geladen werden');
       const data = await response.json();
+      if (request !== selectionRequest.current) return;
       setSelectedResult(data);
       setIsDetailsExpanded(true);
     } catch (err) {
+      if (request !== selectionRequest.current) return;
       console.error(err);
       setError('Details Fehler');
     } finally {
-      setLoading(false);
+      if (request === selectionRequest.current) setLoading(false);
     }
   };
 
-  const showNearby = () => {
-    if (!navigator.geolocation) {
-      setError('Geolocation not supported');
-      return;
-    }
+  const beginNearby = () => {
+    const request = ++nearbyRequest.current;
+    selectionRequest.current++;
+    searchRequest.current++;
+    setLoading(false);
+    setNearbyLoading(true);
+    setError(null);
+    setSelectedResult(null);
+    setNearbyObjects([]);
+    setNearbyStatus(null);
+    setResults([]);
+    setSearchQuery('');
+    setIsSelecting(false);
+    setIsDetailsExpanded(false);
+    setObjectLocation(null);
+    return request;
+  };
 
-    setLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { latitude, longitude } = position.coords;
-        setUserLocation([latitude, longitude]);
-        
-        try {
-          const response = await authenticatedFetch(`/api/search/nearby?lat=${latitude}&lon=${longitude}&radius=500`);
-          if (response.status === 401) {
-            handleLogout();
-            return;
-          }
-          if (response.ok) {
-            const data = await response.json();
-            setNearbyObjects(data);
-          }
-        } catch (err) {
-          console.error('Nearby error:', err);
-        } finally {
-          setLoading(false);
-        }
-      },
-      (err) => {
-        setLoading(false);
-        setError('Location error');
-      }
-    );
+  const fetchNearby = async (query: { lat: number; lon: number; radius: number }, request: number, bounds?: MapBounds) => {
+    try {
+      const params = new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)]));
+      const response = await authenticatedFetch('/api/search/nearby?' + params);
+      if (request !== nearbyRequest.current) return;
+      if (response.status === 401) { handleLogout(); return; }
+      if (!response.ok) throw new Error('Objektabfrage fehlgeschlagen (' + response.status + '). Bitte erneut versuchen.');
+      const data = await response.json();
+      if (request !== nearbyRequest.current) return;
+      if (!Array.isArray(data)) throw new Error('Die API hat keine gültige Objektliste geliefert.');
+      const objects = data.filter((o): o is NearbyObject => o && Object.hasOwn(objectLabels, o.type) && o.type !== 'connection' && typeof o.lat === 'number' && typeof o.lon === 'number' && Number.isFinite(o.lat) && Number.isFinite(o.lon));
+      const visible = bounds ? objects.filter(o => inBounds(o, bounds)) : objects;
+      setNearbyObjects(visible);
+      setNearbyStatus(visible.length ? (bounds ? 'Objekte im abgefragten Ausschnitt' : 'Objekte im Umkreis von 500 m') : 'Keine Objekte gefunden');
+    } catch (err) {
+      if (request === nearbyRequest.current) setError(err instanceof Error ? err.message : 'Objekte konnten nicht geladen werden.');
+    } finally {
+      if (request === nearbyRequest.current) setNearbyLoading(false);
+    }
+  };
+
+  const searchArea = () => {
+    if (!mapBounds) return;
+    const query = areaQuery(mapBounds);
+    // Avoid unintentionally querying an entire country via the radius endpoint.
+    if (query.radius > 10000) { setError('Bitte näher heranzoomen: Der Suchbereich darf höchstens 10 km Radius umfassen.'); return; }
+    const request = beginNearby();
+    setUserLocation(null);
+    void fetchNearby(query, request, mapBounds);
+  };
+
+  const showNearby = () => {
+    if (!navigator.geolocation) { setError('Dieser Browser unterstützt keine Standortbestimmung.'); return; }
+    const request = beginNearby();
+    navigator.geolocation.getCurrentPosition(position => {
+      if (request !== nearbyRequest.current) return;
+      const { latitude: lat, longitude: lon } = position.coords;
+      setUserLocation([lat, lon]);
+      void fetchNearby({ lat, lon, radius: 500 }, request);
+    }, err => {
+      if (request !== nearbyRequest.current) return;
+      setNearbyLoading(false);
+      setError(err.code === 1 ? 'Standortzugriff verweigert. Du kannst stattdessen im Kartenausschnitt suchen.' : 'Standort konnte nicht bestimmt werden. Bitte im Kartenausschnitt suchen.');
+    }, { timeout: 15000, maximumAge: 30000 });
   };
 
   if (!token) {
@@ -224,8 +320,8 @@ export default function App() {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Suchen nach Addresse..."
+              onChange={(e) => { searchRequest.current++; setLoading(false); setResults([]); setIsSelecting(false); setSearchQuery(e.target.value); }}
+              placeholder="Nach Adresse suchen..."
               className="w-full pl-10 pr-10 py-2.5 bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-red-600 transition-all text-base placeholder:text-slate-600 shadow-inner"
             />
             {searchQuery && !loading && (
@@ -252,14 +348,16 @@ export default function App() {
                 <div className="max-h-[60vh] overflow-y-auto overflow-x-hidden py-1">
                   {results.map((res) => (
                     <button
-                      key={res.uuid}
+                      type="button"
+                      key={`${resultType(res)}-${res.connection_uuid || res.uuid || res.address}`}
                       onClick={() => selectResult(res)}
                       className="w-full px-5 py-4 text-left hover:bg-slate-800/80 border-b border-slate-800/50 last:border-none flex items-center justify-between group active:bg-slate-700/50"
                     >
-                      <div className="flex flex-col min-w-0">
+                      <ObjectSymbol type={resultType(res)} className="mr-3" />
+                      <div className="flex flex-col min-w-0 flex-1">
                         {/* Cutting result ... text-sm font-bold truncate pr-4 text-slate-200 */}
                         <span className="text-sm font-bold text-slate-200 break-words whitespace-normal">{res.address}</span>
-                        {res.location && <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{res.location}</span>}
+                        <span className="text-xs text-slate-400">{objectLabels[resultType(res)]}{typeof res.location === 'string' && res.location ? ` · ${res.location}` : ''}</span>
                       </div>
                       <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-red-500 shrink-0" />
                     </button>
@@ -273,6 +371,9 @@ export default function App() {
         <div className="relative">
           <button
             onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+            title="Einstellungen"
+            aria-label="Einstellungen"
+            aria-expanded={isUserMenuOpen}
             className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-sm font-bold text-red-500 hover:border-red-500 transition-all shadow-lg active:scale-95 uppercase"
           >
             {username?.charAt(0) || 'U'}
@@ -289,33 +390,46 @@ export default function App() {
                   initial={{ opacity: 0, scale: 0.95, y: 10 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                  className="absolute right-0 mt-3 w-56 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden py-2"
+                  className="absolute right-0 mt-3 w-72 max-w-[calc(100vw-2rem)] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden py-2"
                 >
                   <div className="px-4 py-3 border-b border-slate-800 mb-2">
                     <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Angemeldet als</p>
                     <p className="text-sm font-bold text-white capitalize">{username || 'Unbekannt'}</p>
                   </div>
                   
-                  <button
-                    onClick={() => {
-                      setShowConnections(!showConnections);
-                    }}
-                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-800 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Power className={cn("w-4 h-4", showConnections ? "text-red-500" : "text-slate-500")} />
-                      <span className="text-sm font-bold">Verbindungen</span>
+                  <div className="px-4 py-3 border-b border-slate-800">
+                    <p className="text-xs font-bold text-slate-400 mb-2">Kartenansicht</p>
+                    <div className="flex gap-1" role="group" aria-label="Kartenansicht">
+                      {(['light', 'dark', 'satellite'] as MapStyle[]).map(style => <button key={style} onClick={() => setMapStyle(style)} aria-pressed={mapStyle === style} className={cn('flex-1 rounded-lg py-2 text-xs font-bold', mapStyle === style ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-300')}>{({ light: 'Hell', dark: 'Dunkel', satellite: 'Satellit' })[style]}</button>)}
                     </div>
-                    <div className={cn(
-                      "w-8 h-4 rounded-full relative transition-colors",
-                      showConnections ? "bg-red-600" : "bg-slate-700"
-                    )}>
-                      <div className={cn(
-                        "absolute top-1 w-2 h-2 rounded-full bg-white transition-all",
-                        showConnections ? "left-5" : "left-1"
-                      )} />
-                    </div>
-                  </button>
+                  </div>
+                  {[
+                    { category: 'Suche in Umgebung', label: 'Anzeige Gebäude', enabled: showBuildings, toggle: () => setShowBuildings(value => !value), Icon: Building2 },
+                    { category: 'GIS-Kartenebene', label: 'Rohrtrassen anzeigen', enabled: showTrenches, toggle: () => setShowTrenches(value => !value), Icon: Layers },
+                    { category: 'Verbindungsdarstellung', label: 'Zeige Verbindungen', enabled: showConnections, toggle: () => setShowConnections(value => !value), Icon: Cable },
+                  ].map(({ category, label, enabled, toggle, Icon }) => (
+                    <section key={category} aria-label={category} className="border-b border-slate-800 py-3">
+                      <h3 className="px-4 mb-2 text-xs font-bold text-slate-400">{category}</h3>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={enabled}
+                        aria-label={label}
+                        onClick={toggle}
+                        className="w-full px-4 py-2 flex items-center justify-between gap-3 hover:bg-slate-800 transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-red-500"
+                      >
+                        <span className="flex items-center gap-3 text-sm font-bold">
+                          <Icon aria-hidden="true" className={cn('w-4 h-4 shrink-0', enabled ? 'text-red-500' : 'text-slate-500')} />
+                          {label}
+                        </span>
+                        <span aria-hidden="true" className={cn('w-10 h-6 shrink-0 rounded-full p-1 transition-colors', enabled ? 'bg-red-600' : 'bg-slate-600')}>
+                          <span className={cn('flex h-4 w-4 items-center justify-center rounded-full bg-white transition-transform', enabled ? 'translate-x-4' : 'translate-x-0')}>
+                            {enabled && <Check className="h-3 w-3 text-red-600" />}
+                          </span>
+                        </span>
+                      </button>
+                    </section>
+                  ))}
 
                   <button
                     onClick={handleLogout}
@@ -333,19 +447,45 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 flex overflow-hidden relative">
+        <a href="https://www.swisstopo.admin.ch/" target="_blank" rel="noreferrer" className="absolute bottom-0 right-0 z-[45] rounded-tl bg-slate-900/90 px-2 py-0.5 text-[10px] text-slate-200">© swisstopo</a>
         {/* Map View - Always Full Background */}
         <section className="absolute inset-0 z-0">
           <MapView 
             selectedResult={selectedResult} 
             nearbyObjects={nearbyObjects}
             userLocation={userLocation}
+            objectLocation={objectLocation}
             showConnections={showConnections}
-            onMarkerClick={async (name) => {}}
+            showTrenches={showTrenches}
+            showBuildings={showBuildings}
+            mapStyle={mapStyle}
+            onBoundsChange={setMapBounds}
           />
+
+          <div className="absolute top-4 left-4 right-20 z-[500] flex flex-col items-start gap-2 pointer-events-none">
+            <div className="flex items-center gap-2">
+              <button onClick={searchArea} disabled={nearbyLoading || !mapBounds} className="pointer-events-auto px-4 py-3 rounded-2xl bg-slate-900/95 text-white shadow-xl border border-slate-700 text-sm font-bold disabled:opacity-60 flex items-center gap-2">
+                {nearbyLoading ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <Search className="w-4 h-4 shrink-0" />}In diesem Bereich suchen
+              </button>
+              {(nearbyLoading || nearbyStatus !== null || nearbyObjects.length > 0) && (
+                <button
+                  type="button"
+                  onClick={clearNearby}
+                  aria-label="Objekte auf der Karte entfernen"
+                  title="Objekte auf der Karte entfernen"
+                  className="pointer-events-auto shrink-0 w-11 h-11 flex items-center justify-center rounded-2xl bg-slate-900/95 text-red-500 hover:bg-red-950 shadow-xl border border-red-900/50 focus-visible:outline-2 focus-visible:outline-red-500"
+                >
+                  <X aria-hidden="true" className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+            {nearbyStatus && <div role="status" className="rounded-xl bg-slate-900/95 px-3 py-2 text-xs text-slate-200 max-w-xs">{nearbyStatus} · {nearbyObjects.filter(o => showBuildings || o.type !== 'building').length} sichtbar{!showBuildings && ' · Gebäude ausgeblendet'}</div>}
+          </div>
 
           <button
             onClick={showNearby}
-            className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-[999] w-12 h-12 bg-slate-900/90 backdrop-blur-xl text-slate-400 rounded-2xl flex items-center justify-center shadow-2xl hover:text-white transition-all active:scale-90 z-30 border border-slate-700/50 ring-1 ring-white/5"
+            disabled={nearbyLoading}
+            className="absolute bottom-8 right-4 sm:bottom-8 sm:right-6 z-[500] w-12 h-12 bg-slate-900/90 backdrop-blur-xl text-slate-400 rounded-2xl flex items-center justify-center shadow-2xl hover:text-white transition-all active:scale-90 border border-slate-700/50 ring-1 ring-white/5 disabled:opacity-50"
             title="Infrastruktur in der Nähe"
           >
             <MapPin className="w-5 h-5" />
@@ -386,16 +526,33 @@ export default function App() {
                 onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}
               >
                 <div className="w-12 h-1.5 bg-slate-800 rounded-full mb-4"></div>
-                <div className="flex items-center justify-between w-full px-8">
-                  <div className="flex items-center gap-3">
-                    <Box className="w-5 h-5 text-red-500" />
-                    <div>
-                      <h2 className="text-lg font-black text-white italic tracking-tighter uppercase leading-none">Gebäude Details</h2>
+                <div className="flex items-center justify-between gap-2 w-full px-4 sm:px-8">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Box className="w-5 h-5 text-red-500 shrink-0" />
+                    <div className="min-w-0">
+                      <h2 className="text-sm sm:text-lg font-black text-white italic tracking-tighter uppercase leading-none">Gebäude Details</h2>
                       <p className="text-[10px] text-slate-500 font-bold tracking-widest mt-1 truncate max-w-[200px]">{selectedResult.building.address}</p>
                     </div>
                   </div>
-                  <div className="bg-slate-800 p-2 rounded-full text-slate-400">
-                    {isDetailsExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      aria-label={isDetailsExpanded ? 'Verbindungsdetails minimieren' : 'Verbindungsdetails vergrössern'}
+                      aria-expanded={isDetailsExpanded}
+                      onClick={event => { event.stopPropagation(); setIsDetailsExpanded(value => !value); }}
+                      className="bg-slate-800 w-10 h-10 flex items-center justify-center rounded-full text-slate-400 hover:text-white focus-visible:outline-2 focus-visible:outline-red-500"
+                    >
+                      {isDetailsExpanded ? <ChevronDown aria-hidden="true" className="w-4 h-4" /> : <ChevronUp aria-hidden="true" className="w-4 h-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Verbindung aus der Ansicht entfernen"
+                      title="Verbindung aus der Ansicht entfernen"
+                      onClick={event => { event.stopPropagation(); clearSearch(); }}
+                      className="bg-slate-800 w-10 h-10 flex items-center justify-center rounded-full text-red-500 hover:bg-red-950 focus-visible:outline-2 focus-visible:outline-red-500"
+                    >
+                      <X aria-hidden="true" className="w-5 h-5" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -582,7 +739,8 @@ export default function App() {
         {/* Map Legend - Floating */}
         <div className="absolute top-4 right-4 sm:top-6 sm:right-6 z-30">
            <MapLegend 
-             showConnections={showConnections} 
+             showConnections={showConnections && !!selectedResult}
+             showTrenches={showTrenches}
              isOpen={isLegendOpen} 
              onToggle={() => setIsLegendOpen(!isLegendOpen)} 
            />
@@ -592,57 +750,14 @@ export default function App() {
   );
 }
 
-function MapLegend({ showConnections, isOpen, onToggle }: { showConnections: boolean, isOpen: boolean, onToggle: () => void }) {
-  return (
-    <div className="flex flex-col items-end gap-2">
-      <button
-        onClick={onToggle}
-        className="w-12 h-12 bg-slate-900/90 backdrop-blur-xl rounded-2xl border border-slate-700/50 shadow-2xl flex items-center justify-center text-slate-400 hover:text-white transition-all active:scale-95 ring-1 ring-white/5 pointer-events-auto"
-        title="Legende umschalten"
-      >
-        <Layers className="w-5 h-5" />
-      </button>
-
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: -20, x: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0, x: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: -20, x: 20 }}
-            className="bg-slate-900/90 backdrop-blur-xl p-5 rounded-3xl border border-slate-700/50 shadow-2xl text-[10px] space-y-4 ring-1 ring-white/5 w-44 origin-top-right pointer-events-auto"
-          >
-            <div className="flex items-center gap-4">
-              <div className="w-3.5 h-3.5 rounded bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.6)]"></div>
-              <span className="font-black text-slate-300 uppercase tracking-widest">Gebäude</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="w-3.5 h-3.5 rounded bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.6)]"></div>
-              <span className="font-black text-slate-300 uppercase tracking-widest">Trafo</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="w-3.5 h-3.5 rounded bg-yellow-500 shadow-[0_0_12px_rgba(234,179,8,0.6)]"></div>
-              <span className="font-black text-slate-300 uppercase tracking-widest">Verteilkabine</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="w-3.5 h-3.5 rounded bg-slate-700 border border-slate-600"></div>
-              <span className="font-black text-slate-300 uppercase tracking-widest">Trennstelle</span>
-            </div>
-            
-            {showConnections && (
-              <div className="pt-4 border-t border-slate-800 space-y-3">
-                <div className="flex items-center gap-4">
-                  <div className="w-7 h-1.5 bg-blue-500 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.4)]"></div>
-                  <span className="text-slate-400 font-bold uppercase tracking-tighter">Hauptleitung</span>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="w-7 h-1.5 bg-green-500 rounded-full shadow-[0_0_10px_rgba(34,197,94,0.4)]"></div>
-                  <span className="text-slate-400 font-bold uppercase tracking-tighter">Hausanschluss</span>
-                </div>
-              </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
+function MapLegend({ showConnections, showTrenches, isOpen, onToggle }: { showConnections: boolean; showTrenches: boolean; isOpen: boolean; onToggle: () => void }) {
+  return <div className="flex flex-col items-end gap-2">
+    <button onClick={onToggle} aria-expanded={isOpen} aria-label="Kartenlegende" className="w-12 h-12 bg-slate-900/95 rounded-2xl border border-slate-700 shadow-xl flex items-center justify-center text-slate-200" title="Kartenlegende"><Layers className="w-5 h-5" /></button>
+    {isOpen && <div className="bg-slate-900/95 p-4 rounded-2xl border border-slate-700 shadow-xl w-64 max-w-[calc(100vw-2rem)] space-y-3">
+      <h2 className="font-bold text-sm">Objekte auf der Karte</h2>
+      {(['transformer', 'distribution_box', 'disconnect_point', 'building'] as const).map(type => <div key={type} className="flex items-center gap-3 text-sm"><ObjectSymbol type={type} /><span>{objectLabels[type]}</span></div>)}
+      {showTrenches && <p className="text-xs text-orange-400 border-t border-slate-700 pt-3 leading-relaxed">Orange Linien: GIS-Rohrtrassen, keine bestätigten Hausanschlussrouten.</p>}
+      {showConnections && <p className="text-xs text-slate-300 border-t border-slate-700 pt-3 leading-relaxed">{showTrenches ? 'Gestrichelte Linien: schematische Verbindungen zwischen den bekannten Anschlussanlagen und dem Gebäude.' : 'Pfeile zeigen die Stromrichtung von der Trafostation über die Zwischenobjekte zum Gebäude. Der Verlauf ist schematisch.'}</p>}
+    </div>}
+  </div>;
 }
