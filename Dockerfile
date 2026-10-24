@@ -14,6 +14,8 @@ RUN npm run build
 # ---- Production Stage (Nginx) ----
 FROM nginx:alpine
 
+RUN apk add --no-cache ca-certificates && update-ca-certificates
+
 ENV NGINX_ENVSUBST_FILTER=GIS_API_TOKEN
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
 

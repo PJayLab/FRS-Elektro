@@ -104,8 +104,10 @@ swisstopo service.
 Enable **GIS-Kartenebene → Rohrtrassen anzeigen** in map settings to load
 `elektrizitaet_trasse` for the visible viewport. Orange lines show GIS trench
 geometry, not a verified route to the selected building. Existing connection
-objects remain visible. Schematic lines and arrows are suppressed while this
-layer is enabled; disabling it restores them if **Zeige Verbindungen** is on.
+objects remain visible. When **Zeige Verbindungen** is on, schematic connections
+remain visible as thinner, subdued dashed lines without arrows while the trench
+layer is enabled. Orange trenches appear additionally. Disabling the trench
+layer restores the original solid connection lines and direction arrows.
 No permanent GIS object matching or automatic routing is performed.
 
 The client converts EPSG:2056 (LV95) geometry to WGS84 with Proj4js and a
@@ -133,3 +135,23 @@ search/auth backend remains separately deployed.
 
 `tests/gis.test.ts` checks a known Bern coordinate, viewport conversion,
 separate line parts, and rejection of malformed geometry or unsupported CRS.
+
+### Troubleshooting the GIS proxy
+
+The outer reverse proxy must forward `/gis/trenches` unchanged to the frontend
+container (container port 80), while `/api/` can continue to use the application
+backend. An upstream GIS URL in frontend Nginx logs confirms this routing works.
+
+`upstream SSL certificate verify error: (20:unable to get local issuer certificate)`
+means the frontend proxy cannot validate the GIS server's certificate chain.
+The image explicitly installs CA certificates and permits a verification depth
+of five to support multiple intermediate certificates. Verification stays on.
+The resolver uses IPv4 only because the deployment does not have IPv6 egress.
+Rebuild the image and recreate the frontend container to apply these changes;
+restarting an old container or replacing only static assets is insufficient.
+If certificate validation still fails, inspect the upstream certificate chain
+and the container's CA bundle rather than disabling verification.
+
+Run `docker logs --since 10m FRONTEND_CONTAINER` to inspect errors and
+`docker exec FRONTEND_CONTAINER nginx -t` to validate the deployed config.
+Keep `GIS_API_TOKEN` supplied as a runtime secret when recreating the container.

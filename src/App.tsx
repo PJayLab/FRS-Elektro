@@ -739,7 +739,8 @@ export default function App() {
         {/* Map Legend - Floating */}
         <div className="absolute top-4 right-4 sm:top-6 sm:right-6 z-30">
            <MapLegend 
-             showConnections={showConnections && !showTrenches && !!selectedResult}
+             showConnections={showConnections && !!selectedResult}
+             showTrenches={showTrenches}
              isOpen={isLegendOpen} 
              onToggle={() => setIsLegendOpen(!isLegendOpen)} 
            />
@@ -749,13 +750,14 @@ export default function App() {
   );
 }
 
-function MapLegend({ showConnections, isOpen, onToggle }: { showConnections: boolean; isOpen: boolean; onToggle: () => void }) {
+function MapLegend({ showConnections, showTrenches, isOpen, onToggle }: { showConnections: boolean; showTrenches: boolean; isOpen: boolean; onToggle: () => void }) {
   return <div className="flex flex-col items-end gap-2">
     <button onClick={onToggle} aria-expanded={isOpen} aria-label="Kartenlegende" className="w-12 h-12 bg-slate-900/95 rounded-2xl border border-slate-700 shadow-xl flex items-center justify-center text-slate-200" title="Kartenlegende"><Layers className="w-5 h-5" /></button>
     {isOpen && <div className="bg-slate-900/95 p-4 rounded-2xl border border-slate-700 shadow-xl w-64 max-w-[calc(100vw-2rem)] space-y-3">
       <h2 className="font-bold text-sm">Objekte auf der Karte</h2>
       {(['transformer', 'distribution_box', 'disconnect_point', 'building'] as const).map(type => <div key={type} className="flex items-center gap-3 text-sm"><ObjectSymbol type={type} /><span>{objectLabels[type]}</span></div>)}
-      {showConnections && <p className="text-xs text-slate-300 border-t border-slate-700 pt-3 leading-relaxed">Pfeile zeigen die Stromrichtung von der Trafostation über die Zwischenobjekte zum Gebäude. Der Verlauf ist schematisch.</p>}
+      {showTrenches && <p className="text-xs text-orange-400 border-t border-slate-700 pt-3 leading-relaxed">Orange Linien: GIS-Rohrtrassen, keine bestätigten Hausanschlussrouten.</p>}
+      {showConnections && <p className="text-xs text-slate-300 border-t border-slate-700 pt-3 leading-relaxed">{showTrenches ? 'Gestrichelte Linien: schematische Verbindungen zwischen den bekannten Anschlussanlagen und dem Gebäude.' : 'Pfeile zeigen die Stromrichtung von der Trafostation über die Zwischenobjekte zum Gebäude. Der Verlauf ist schematisch.'}</p>}
     </div>}
   </div>;
 }

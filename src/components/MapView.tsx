@@ -69,7 +69,7 @@ function ViewController({ selectedResult, userLocation, objectLocation, onBounds
   return null;
 }
 
-const DirectedLine: React.FC<{ from: [number, number]; to: [number, number]; color: string }> = ({ from, to, color }) => {
+const DirectedLine: React.FC<{ from: [number, number]; to: [number, number]; color: string; subdued: boolean }> = ({ from, to, color, subdued }) => {
   const map = useMap();
   const [zoom, setZoom] = useState(map.getZoom());
   useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
@@ -85,9 +85,9 @@ const DirectedLine: React.FC<{ from: [number, number]; to: [number, number]; col
     }));
   }, [from[0], from[1], to[0], to[1], zoom, map, color]);
   return <>
-    <Polyline positions={[from, to]} pathOptions={{ color: 'white', weight: 7, opacity: 0.8 }} interactive={false} />
-    <Polyline positions={[from, to]} pathOptions={{ color, weight: 4, opacity: 1 }}><Popup>Stromrichtung: Trafostation → Zwischenobjekte → Gebäude</Popup></Polyline>
-    {arrows.map((arrow, i) => <Marker key={i} position={arrow.position} icon={arrow.icon} interactive={false} keyboard={false} zIndexOffset={-1000} />)}
+    <Polyline positions={[from, to]} pathOptions={{ color: 'white', weight: subdued ? 4 : 7, opacity: subdued ? 0.35 : 0.8, dashArray: subdued ? '8 8' : undefined }} interactive={false} />
+    <Polyline positions={[from, to]} pathOptions={{ color, weight: subdued ? 2 : 4, opacity: subdued ? 0.65 : 1, dashArray: subdued ? '8 8' : undefined }}><Popup>{subdued ? 'Schematische Verbindung · keine bestätigte Rohrführung' : 'Stromrichtung: Trafostation → Zwischenobjekte → Gebäude'}</Popup></Polyline>
+    {!subdued && arrows.map((arrow, i) => <Marker key={i} position={arrow.position} icon={arrow.icon} interactive={false} keyboard={false} zIndexOffset={-1000} />)}
   </>;
 }
 
@@ -106,11 +106,11 @@ export const MapView: React.FC<MapViewProps> = ({ selectedResult, nearbyObjects,
       {userLocation && <><Circle center={userLocation} radius={500} pathOptions={{ color: '#ef4444', fillOpacity: 0.04, weight: 1 }} /><Circle center={userLocation} radius={8} pathOptions={{ color: 'white', fillColor: '#2563eb', fillOpacity: 1, weight: 3 }}><Popup>Dein Standort</Popup></Circle></>}
       <ObjectMarkers objects={nearbyObjects.filter(obj => (showBuildings || obj.type !== 'building') && Number.isFinite(obj.lat) && Number.isFinite(obj.lon))} />
       <ObjectMarkers objects={nodes} />
+      {selectedResult && showConnections && networkSegments(selectedResult).map(([from, to], i) => <DirectedLine key={i} from={[from.lat, from.lon]} to={[to.lat, to.lon]} color={mapStyle === 'light' ? '#334155' : '#38bdf8'} subdued={showTrenches} />)}
       {showTrenches && <TrenchLayer onStatus={setTrenchStatus} />}
-      {selectedResult && showConnections && !showTrenches && networkSegments(selectedResult).map(([from, to], i) => <DirectedLine key={i} from={[from.lat, from.lon]} to={[to.lat, to.lon]} color={mapStyle === 'light' ? '#334155' : '#38bdf8'} />)}
       <ViewController selectedResult={selectedResult} userLocation={userLocation} objectLocation={objectLocation} onBoundsChange={onBoundsChange} />
     </MapContainer>
-    {showTrenches && <div role="status" className="absolute bottom-20 left-14 right-20 z-[500] rounded-lg bg-slate-900/95 p-3 text-xs text-white"><strong className="text-orange-400">Rohrtrassen im Kartenausschnitt</strong><p>GIS-Kontext · keine bestätigte Hausanschlussroute. Gerade Verbindungen sind ausgeblendet.</p><p>{trenchStatus}</p></div>}
+    {showTrenches && <div role="status" className="absolute bottom-20 left-14 right-20 z-[500] rounded-lg bg-slate-900/95 p-3 text-xs text-white"><strong className="text-orange-400">Rohrtrassen im Kartenausschnitt</strong><p>GIS-Kontext · keine bestätigte Hausanschlussroute. Gestrichelte Linien zeigen die schematischen Verbindungen.</p><p>{trenchStatus}</p></div>}
     {tileError && <div role="status" className="absolute bottom-10 left-14 right-20 z-[500] rounded-lg bg-slate-900 p-2 text-xs text-white">Kartenmaterial nicht verfügbar. Internetverbindung prüfen oder Kartenmodus wechseln. swisstopo deckt die Schweiz ab.</div>}
   </div>;
 };
