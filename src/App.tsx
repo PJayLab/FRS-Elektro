@@ -19,6 +19,7 @@ export default function App() {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [objectLocation, setObjectLocation] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showTrenches, setShowTrenches] = useState(false);
   const [showConnections, setShowConnections] = useState(true);
   const [showBuildings, setShowBuildings] = useState(false);
   const [mapStyle, setMapStyle] = useState<MapStyle>(() => {
@@ -404,6 +405,7 @@ export default function App() {
                   </div>
                   {[
                     { category: 'Suche in Umgebung', label: 'Anzeige Gebäude', enabled: showBuildings, toggle: () => setShowBuildings(value => !value), Icon: Building2 },
+                    { category: 'GIS-Kartenebene', label: 'Rohrtrassen anzeigen', enabled: showTrenches, toggle: () => setShowTrenches(value => !value), Icon: Layers },
                     { category: 'Verbindungsdarstellung', label: 'Zeige Verbindungen', enabled: showConnections, toggle: () => setShowConnections(value => !value), Icon: Cable },
                   ].map(({ category, label, enabled, toggle, Icon }) => (
                     <section key={category} aria-label={category} className="border-b border-slate-800 py-3">
@@ -454,6 +456,7 @@ export default function App() {
             userLocation={userLocation}
             objectLocation={objectLocation}
             showConnections={showConnections}
+            showTrenches={showTrenches}
             showBuildings={showBuildings}
             mapStyle={mapStyle}
             onBoundsChange={setMapBounds}
@@ -736,7 +739,7 @@ export default function App() {
         {/* Map Legend - Floating */}
         <div className="absolute top-4 right-4 sm:top-6 sm:right-6 z-30">
            <MapLegend 
-             showConnections={showConnections && !!selectedResult}
+             showConnections={showConnections && !showTrenches && !!selectedResult}
              isOpen={isLegendOpen} 
              onToggle={() => setIsLegendOpen(!isLegendOpen)} 
            />

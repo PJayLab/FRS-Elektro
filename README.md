@@ -98,3 +98,38 @@ results. The current search endpoint remains unchanged.
 Use mocked API responses for browser checks when no test backend and suitable
 credentials are available. Map tiles can load independently from the public
 swisstopo service.
+
+### GIS trench overlay
+
+Enable **GIS-Kartenebene → Rohrtrassen anzeigen** in map settings to load
+`elektrizitaet_trasse` for the visible viewport. Orange lines show GIS trench
+geometry, not a verified route to the selected building. Existing connection
+objects remain visible. Schematic lines and arrows are suppressed while this
+layer is enabled; disabling it restores them if **Zeige Verbindungen** is on.
+No permanent GIS object matching or automatic routing is performed.
+
+The client converts EPSG:2056 (LV95) geometry to WGS84 with Proj4js and a
+Helmert datum transformation (approximately metre-level, not survey accuracy).
+LineString vertices and separate MultiLineString parts are preserved. The
+viewport is converted to LV95 before requesting data. Requests are debounced,
+cancelled on viewport changes or layer removal, and limited to a 2 km viewport
+in each dimension. The requested feature limit is 1,000. The supplied API
+example does not document pagination or completeness metadata, so the UI
+always notes that coverage may be incomplete. Empty and failed requests have
+explicit status messages; they never create inferred connecting segments.
+
+Set `GIS_API_TOKEN` in an ignored `.env.local` file for the Vite development
+proxy and restart the dev server. The token is server-only and must never use
+a `VITE_` prefix. The frontend calls `/gis/trenches`; the proxy forwards to the
+fixed GIS layer endpoint with the bearer credential and without browser cookies.
+
+The Docker image includes an Nginx proxy template. Supply `GIS_API_TOKEN` as a
+runtime environment secret (for example with your deployment secret manager).
+Local environment files are excluded from the Docker build context. Other
+static hosting must implement the same server-side `/gis/trenches` proxy;
+`vite preview` alone does not provide it. Apply your deployment's access
+controls to this proxy as well as to the application. The existing external
+search/auth backend remains separately deployed.
+
+`tests/gis.test.ts` checks a known Bern coordinate, viewport conversion,
+separate line parts, and rejection of malformed geometry or unsupported CRS.

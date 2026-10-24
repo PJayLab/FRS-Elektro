@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import L from 'leaflet';
 import { MapBounds, MapStyle, NetworkResult, NearbyObject, ObjectType } from '../types';
 import { hasCoordinates, networkSegments, objectLabels, objectName } from '../lib/map';
+import { TrenchLayer } from './TrenchLayer';
 import { ObjectSymbol } from './ObjectSymbol';
 
 const attribution = '&copy; <a href="https://www.swisstopo.admin.ch/">swisstopo</a>';
@@ -45,6 +46,7 @@ interface MapViewProps {
   userLocation: [number, number] | null;
   objectLocation: [number, number] | null;
   showConnections: boolean;
+  showTrenches: boolean;
   showBuildings: boolean;
   mapStyle: MapStyle;
   onBoundsChange: (bounds: MapBounds) => void;
@@ -89,7 +91,8 @@ const DirectedLine: React.FC<{ from: [number, number]; to: [number, number]; col
   </>;
 }
 
-export const MapView: React.FC<MapViewProps> = ({ selectedResult, nearbyObjects, userLocation, objectLocation, showConnections, showBuildings, mapStyle, onBoundsChange }) => {
+export const MapView: React.FC<MapViewProps> = ({ selectedResult, nearbyObjects, userLocation, objectLocation, showConnections, showTrenches, showBuildings, mapStyle, onBoundsChange }) => {
+  const [trenchStatus, setTrenchStatus] = useState('');
   const [tileError, setTileError] = useState(false);
   useEffect(() => setTileError(false), [mapStyle]);
   const nodes = selectedResult ? (['transformer', 'distribution_box', 'disconnect_point', 'building'] as ObjectType[]).flatMap(type => {
@@ -103,9 +106,11 @@ export const MapView: React.FC<MapViewProps> = ({ selectedResult, nearbyObjects,
       {userLocation && <><Circle center={userLocation} radius={500} pathOptions={{ color: '#ef4444', fillOpacity: 0.04, weight: 1 }} /><Circle center={userLocation} radius={8} pathOptions={{ color: 'white', fillColor: '#2563eb', fillOpacity: 1, weight: 3 }}><Popup>Dein Standort</Popup></Circle></>}
       <ObjectMarkers objects={nearbyObjects.filter(obj => (showBuildings || obj.type !== 'building') && Number.isFinite(obj.lat) && Number.isFinite(obj.lon))} />
       <ObjectMarkers objects={nodes} />
-      {selectedResult && showConnections && networkSegments(selectedResult).map(([from, to], i) => <DirectedLine key={i} from={[from.lat, from.lon]} to={[to.lat, to.lon]} color={mapStyle === 'light' ? '#334155' : '#38bdf8'} />)}
+      {showTrenches && <TrenchLayer onStatus={setTrenchStatus} />}
+      {selectedResult && showConnections && !showTrenches && networkSegments(selectedResult).map(([from, to], i) => <DirectedLine key={i} from={[from.lat, from.lon]} to={[to.lat, to.lon]} color={mapStyle === 'light' ? '#334155' : '#38bdf8'} />)}
       <ViewController selectedResult={selectedResult} userLocation={userLocation} objectLocation={objectLocation} onBoundsChange={onBoundsChange} />
     </MapContainer>
+    {showTrenches && <div role="status" className="absolute bottom-20 left-14 right-20 z-[500] rounded-lg bg-slate-900/95 p-3 text-xs text-white"><strong className="text-orange-400">Rohrtrassen im Kartenausschnitt</strong><p>GIS-Kontext · keine bestätigte Hausanschlussroute. Gerade Verbindungen sind ausgeblendet.</p><p>{trenchStatus}</p></div>}
     {tileError && <div role="status" className="absolute bottom-10 left-14 right-20 z-[500] rounded-lg bg-slate-900 p-2 text-xs text-white">Kartenmaterial nicht verfügbar. Internetverbindung prüfen oder Kartenmodus wechseln. swisstopo deckt die Schweiz ab.</div>}
   </div>;
 };
